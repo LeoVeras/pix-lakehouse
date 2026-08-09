@@ -1,0 +1,58 @@
+# PR AUTOMATED — espelha a etapa de validações antes do merge.
+# Roda a cada push na branch da PR. Se falhar, a PR não pode ser mergeada.
+
+name: PR Automated
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality-gate:
+    name: Análise de código e Security Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Substitui o SonarQube: analisa bugs, code smells e más práticas.
+      # Mesma função — barrar código ruim antes do merge.
+      - name: Instalar linter
+        run: pip install ruff
+
+      - name: Análise de código
+        run: ruff check src/
+
+      - name: Formatação
+        run: ruff format --check src/
+
+      # Security Gate: procura segredo commitado por engano.
+      # A regra que ele protege: credencial nunca entra no repositório.
+      - name: Security Gate — segredos hardcoded
+        run: |
+          if grep -rEn "(dapi[a-f0-9]{32}|password\s*=\s*['\"]|token\s*=\s*['\"][a-zA-Z0-9]{20})" src/ resources/ 2>/dev/null; then
+            echo "::error::Possível segredo encontrado no código"
+            exit 1
+          fi
+          echo "Nenhum segredo detectado"
+
+  validate-bundle:
+    name: Validar bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      # Valida a sintaxe do bundle sem publicar nada.
+      # Pega erro de YAML e referência quebrada antes de tocar em qualquer ambiente.
+      - name: databricks bundle validate
+        run: databricks bundle validate -t dsv
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}

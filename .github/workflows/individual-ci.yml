@@ -1,0 +1,93 @@
+# INDIVIDUAL CI — a esteira pós-merge.
+# Conduz a versão pelos ambientes: DSV -> testes -> GMUD -> PRD.
+
+name: Individual CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ─────────────────────────────────────────────
+  # DEPLOY DSV — publica no ambiente de desenvolvimento
+  # ─────────────────────────────────────────────
+  deploy-dsv:
+    name: Deploy DSV
+    runs-on: ubuntu-latest
+    environment: dsv
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+
+      - name: Publicar artefatos em DSV
+        run: databricks bundle deploy -t dsv
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+  # ─────────────────────────────────────────────
+  # TESTES FUNCIONAIS — executa em DSV e confere o resultado
+  # ─────────────────────────────────────────────
+  testes-funcionais:
+    name: Testes Funcionais
+    runs-on: ubuntu-latest
+    needs: deploy-dsv
+    environment: dsv
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+
+      # Roda o job de verdade em DSV. Se o quality gate dentro do
+      # notebook levantar exceção, o job falha e a esteira para aqui —
+      # produção não é tocada.
+      - name: Executar pipeline em DSV
+        run: databricks bundle run pix_pipeline -t dsv
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+  # ─────────────────────────────────────────────
+  # GMUD — aprovação humana obrigatória
+  # ─────────────────────────────────────────────
+  # Este job não faz nada além de existir. O bloqueio vem da proteção
+  # do Environment "gmud": com required reviewer configurado, a esteira
+  # trava aqui e espera alguém autorizar. É o análogo direto da GMUD.
+  gmud:
+    name: GMUD — aguardando aprovação
+    runs-on: ubuntu-latest
+    needs: testes-funcionais
+    environment: gmud
+
+    steps:
+      - name: Registro da mudança
+        run: |
+          echo "Commit:  ${{ github.sha }}"
+          echo "Autor:   ${{ github.actor }}"
+          echo "Mensagem: ${{ github.event.head_commit.message }}"
+          echo "Testes em DSV: aprovados"
+          echo "Rollback: git revert ${{ github.sha }} + nova execução da esteira"
+
+  # ─────────────────────────────────────────────
+  # DEPLOY PRD — só roda com a GMUD aprovada
+  # ─────────────────────────────────────────────
+  deploy-prd:
+    name: Deploy PRD
+    runs-on: ubuntu-latest
+    needs: gmud
+    environment: prd
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+
+      - name: Publicar artefatos em PRD
+        run: databricks bundle deploy -t prd
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+      - name: Resumo
+        run: echo "Versão ${{ github.sha }} publicada em PRD"
