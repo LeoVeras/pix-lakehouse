@@ -112,6 +112,7 @@ schema_pix = StructType([
     StructField("conta_recebedor", StringType()),
     StructField("valor", DoubleType()),
     StructField("status", StringType()),
+    StructField("canal", StringType()),
     StructField("data_hora_evento", StringType()),
 ])
 
@@ -122,11 +123,22 @@ CREATE TABLE IF NOT EXISTS silver_pix_transacoes (
     conta_recebedor   STRING,
     valor             DOUBLE,
     status            STRING,
+    canal             STRING,
     data_hora_evento  TIMESTAMP,
     data_evento       DATE,
     _ingest_ts        TIMESTAMP
 ) USING DELTA PARTITIONED BY (data_evento)
 """)
+
+# Evolução de schema: a tabela pode já existir sem a coluna nova.
+# CREATE TABLE IF NOT EXISTS não altera tabela existente — é preciso
+# adicionar a coluna explicitamente, senão o MERGE falha por incompatibilidade.
+colunas = [c.name for c in spark.table("silver_pix_transacoes").schema.fields]
+if "canal" not in colunas:
+    spark.sql("ALTER TABLE silver_pix_transacoes ADD COLUMNS (canal STRING)")
+    print("coluna canal adicionada à silver")
+
+# COMMAND ----------
 
 spark.sql("""
 CREATE TABLE IF NOT EXISTS quarentena_pix (
@@ -140,6 +152,7 @@ CREATE TABLE IF NOT EXISTS quarentena_pix (
 # COMMAND ----------
 
 STATUS_VALIDOS = ["LIQUIDADO", "REJEITADO", "DEVOLVIDO"]
+CANAIS_VALIDOS = ["APP", "INTERNET_BANKING", "API"]
 
 parsed = (
     spark.readStream.table("bronze_pix_eventos")
@@ -160,6 +173,7 @@ motivo = (
     .when(F.col("valor").isNull(), "valor ausente")
     .when(F.col("valor") <= 0, "valor nao positivo")
     .when(~F.col("status").isin(STATUS_VALIDOS), "status desconhecido")
+    .when(~F.col("canal").isin(CANAIS_VALIDOS), "canal desconhecido")
     .when(F.col("data_hora_evento").isNull(), "data_hora_evento invalida")
     .otherwise(F.lit(None))
 )
