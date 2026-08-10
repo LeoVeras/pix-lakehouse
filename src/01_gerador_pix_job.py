@@ -96,9 +96,17 @@ ts_evento = F.current_timestamp() - F.expr(
     "make_interval(0, 0, 0, 0, 0, 0, pmod(seq * 13, 21600))"
 )
 
+# canal de origem do PIX — ~70% app, ~20% internet banking, ~10% API
+canal = (
+    F.when(F.pmod(F.col("seq"), F.lit(10)) < 7, F.lit("APP"))
+    .when(F.pmod(F.col("seq"), F.lit(10)) < 9, F.lit("INTERNET_BANKING"))
+    .otherwise(F.lit("API"))
+)
+
 eventos = (
     base.withColumn("pagador", conta_pagador)
     .withColumn("ts", ts_evento)
+    .withColumn("canal", canal)
     .select(
         F.col("pagador").alias("key"),
         F.to_json(
@@ -114,6 +122,7 @@ eventos = (
                 .when(F.pmod(F.col("seq"), F.lit(53)) == 0, F.lit("REJEITADO"))
                 .otherwise(F.lit("LIQUIDADO"))
                 .alias("status"),
+                F.col("canal").alias("canal"),
                 F.col("ts").cast("string").alias("data_hora_evento"),
             )
         ).alias("value"),
