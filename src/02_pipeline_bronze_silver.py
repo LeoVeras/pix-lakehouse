@@ -168,20 +168,17 @@ silver_stream = parsed.withColumn("_motivo", motivo)
 
 
 def processar_batch(batch_df, batch_id):
-    # dentro do foreachBatch o DF é batch: dá pra ler duas vezes e usar MERGE
-    batch_df.cache()
+    # Sem cache aqui: serverless não suporta persist/cache.
+    # O DataFrame é lido duas vezes (ruins e bons) e recomputado nas duas —
+    # custo aceitável porque o micro-batch é pequeno.
 
-    ruins = batch_df.filter(F.col("_motivo").isNotNull())
-    if not ruins.isEmpty():
-        (
-            ruins.select(
-                "payload_raw",
-                F.col("_motivo").alias("motivo"),
-                F.lit(batch_id).alias("_batch_id"),
-                F.current_timestamp().alias("_quarentena_ts"),
-            )
-            .write.format("delta").mode("append").saveAsTable("quarentena_pix")
-        )
+    ruins = batch_df.filter(F.col("_motivo").isNotNull()).select(
+        "payload_raw",
+        F.col("_motivo").alias("motivo"),
+        F.lit(batch_id).alias("_batch_id"),
+        F.current_timestamp().alias("_quarentena_ts"),
+    )
+    ruins.write.format("delta").mode("append").saveAsTable("quarentena_pix")
 
     bons = (
         batch_df.filter(F.col("_motivo").isNull())
@@ -189,17 +186,14 @@ def processar_batch(batch_df, batch_id):
         .dropDuplicates(["end_to_end_id"])
     )
 
-    if not bons.isEmpty():
-        alvo = DeltaTable.forName(batch_df.sparkSession, "silver_pix_transacoes")
-        (
-            alvo.alias("t")
-            .merge(bons.alias("s"), "t.end_to_end_id = s.end_to_end_id")
-            .whenMatchedUpdateAll()
-            .whenNotMatchedInsertAll()
-            .execute()
-        )
-
-    batch_df.unpersist()
+    alvo = DeltaTable.forName(batch_df.sparkSession, "silver_pix_transacoes")
+    (
+        alvo.alias("t")
+        .merge(bons.alias("s"), "t.end_to_end_id = s.end_to_end_id")
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute()
+    )
 
 
 q_silver = (
