@@ -1,5 +1,6 @@
-# PR AUTOMATED — espelha a etapa de validações antes do merge.
-# Roda a cada push na branch da PR. Se falhar, a PR não pode ser mergeada.
+# PR AUTOMATED — validações antes do merge.
+# Espelha a etapa de mesmo nome da esteira: SonarQube + Security Gate
+# rodando em paralelo. Se qualquer um reprovar, a PR não avança.
 
 name: PR Automated
 
@@ -8,31 +9,38 @@ on:
     branches: [main]
 
 jobs:
-  quality-gate:
-    name: Análise de código e Security Gate
+  # ─────────────────────────────────────────────
+  # SONARQUBE — análise de qualidade do código
+  # ─────────────────────────────────────────────
+  sonarqube:
+    name: SonarQube Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # clone completo: o Sonar precisa do histórico para saber
+          # o que é "new code" e o que é legado
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ─────────────────────────────────────────────
+  # SECURITY GATE — barreira de segurança
+  # ─────────────────────────────────────────────
+  security-gate:
+    name: Security Gate
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # Substitui o SonarQube: analisa bugs, code smells e más práticas.
-      # Mesma função — barrar código ruim antes do merge.
-      - name: Instalar linter
-        run: pip install ruff
-
-      - name: Análise de código
-        run: ruff check src/
-
-      - name: Formatação
-        run: ruff format --check src/
-
-      # Security Gate: procura segredo commitado por engano.
-      # A regra que ele protege: credencial nunca entra no repositório.
-      - name: Security Gate — segredos hardcoded
+      # A regra que isso protege: credencial nunca entra no repositório.
+      # Token vazado em commit continua no histórico mesmo depois de removido.
+      - name: Procurar segredos hardcoded
         run: |
           if grep -rEn "(dapi[a-f0-9]{32}|password\s*=\s*['\"]|token\s*=\s*['\"][a-zA-Z0-9]{20})" src/ resources/ 2>/dev/null; then
             echo "::error::Possível segredo encontrado no código"
@@ -40,17 +48,18 @@ jobs:
           fi
           echo "Nenhum segredo detectado"
 
+  # ─────────────────────────────────────────────
+  # BUNDLE — valida a definição dos jobs
+  # ─────────────────────────────────────────────
   validate-bundle:
     name: Validar bundle
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: databricks/setup-cli@main
 
-      # Valida a sintaxe do bundle sem publicar nada.
-      # Pega erro de YAML e referência quebrada antes de tocar em qualquer ambiente.
+      # Confere sintaxe e referências sem publicar nada em lugar nenhum.
       - name: databricks bundle validate
         run: databricks bundle validate -t dsv
         env:

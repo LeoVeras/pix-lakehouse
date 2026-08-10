@@ -1,0 +1,37 @@
+resources:
+  jobs:
+    pix_pipeline:
+      name: "[${bundle.target}] PIX — ingestão e pipeline"
+
+      tasks:
+        - task_key: gerador
+          notebook_task:
+            notebook_path: ../src/01_gerador_pix_job.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              num_eventos: "50000"
+
+        - task_key: bronze_silver
+          depends_on:
+            - task_key: gerador
+          notebook_task:
+            notebook_path: ../src/02_pipeline_bronze_silver.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              env: ${bundle.target}
+              max_quarentena_pct: "1.0"
+
+        - task_key: gold
+          depends_on:
+            - task_key: bronze_silver
+          notebook_task:
+            notebook_path: ../src/03_gold_pix.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              dias_retroativos: "7"
+
+      queue:
+        enabled: true
