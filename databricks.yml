@@ -1,6 +1,10 @@
 # Databricks Asset Bundle
 # Os jobs passam a ser descritos aqui, não criados pela interface.
-# Nomenclatura de ambientes espelhando o fluxo da esteira: DSV e PRD.
+# Nomenclatura espelhando a esteira: DSV e PRD.
+#
+# O host do workspace NÃO fica neste arquivo. Ele vem da variável de
+# ambiente DATABRICKS_HOST (secret no GitHub) — o mesmo vale para o
+# token. Nada de credencial ou endereço de ambiente versionado no repo.
 
 bundle:
   name: pix-lakehouse
@@ -17,20 +21,17 @@ variables:
     default: contas_digitais_dsv
 
 targets:
-  # DSV — ambiente de desenvolvimento. Deploy automático após o merge.
+  # DSV — desenvolvimento. Recebe deploy automático após o merge.
   dsv:
     mode: development
     default: true
-    workspace:
-      host: https://adb-SEU-ID.azuredatabricks.net
     variables:
       schema: contas_digitais_dsv
 
-  # PRD — produção. Só recebe deploy após aprovação (a GMUD).
+  # PRD — produção. Só recebe deploy após a aprovação da GMUD.
   prd:
     mode: production
     workspace:
-      host: https://adb-SEU-ID.azuredatabricks.net
       root_path: /Shared/.bundle/prd/${bundle.name}
     variables:
       schema: contas_digitais_prd
